@@ -6,9 +6,22 @@ FEISHU_WEBHOOK = os.environ["FEISHU_WEBHOOK"]
 FEISHU_SECRET  = os.environ.get("FEISHU_SECRET")  # 若没启用签名校验可不填
 
 FEEDS = [
-    # 你把官方RSS链接填进来（后续我也可以帮你整理一份）
-    # "https://....rss",
+    # OpenAI：官方 News RSS（目前官方提供）
+    "https://openai.com/news/rss.xml",
+
+    # OpenAI：ChatGPT Release Notes（RSSHub 提供的可用路线）
+    "https://rsshub.app/openai/chatgpt/release-notes",
+
+    # OpenAI：Research（RSSHub 提供的可用路线）
+    "https://rsshub.app/openai/research",
+
+    # Anthropic：Newsroom（RSSHub 路线）
+    "https://rsshub.app/anthropic/news",
+
+    # Google：Google Blog 全站 Feed（包含 AI 分类；用关键词过滤即可）
+    "https://blog.google/feed/",
 ]
+
 
 KEYWORDS = [
     "release", "update", "model", "launch", "gpt", "gemini", "claude", "llama",
