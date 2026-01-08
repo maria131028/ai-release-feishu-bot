@@ -202,80 +202,99 @@ def _clean_text(s: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_official_excerpt(url: str, max_chars: int = 1800) -> str:
+def fetch_official_excerpt(url: str, max_chars: int = 1800):
     """
-    稳定抓取文章正文原文
-    - OpenAI /index/ 类页面：优先解析 Next.js 的 __NEXT_DATA__ JSON 抽文本
-    - 其他页面：trafilatura 抽取，失败再 soup 兜底
+    返回 (text, debug)
+    text: 抽取到的正文（可能为空）
+    debug: 诊断信息（用于写入“我的判断”）
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AIRSSBot/2.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
+
+    status = None
+    final_url = None
+    html_len = 0
+    has_next_data = False
 
     try:
         r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
-        if r.status_code >= 400:
-            return ""
-        html = r.text
+        status = r.status_code
+        final_url = r.url
+        html = r.text or ""
+        html_len = len(html)
+    except Exception as e:
+        return "", f"fetch_err={type(e).__name__}"
+
+    # 基础诊断：状态码、最终URL、HTML长度
+    dbg_base = f"status={status} final={final_url} html_len={html_len}"
+
+    if status is None or status >= 400 or html_len < 200:
+        return "", f"{dbg_base}"
+
+    # 检测 __NEXT_DATA__ 是否存在（OpenAI /index/ 常见）
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        script = soup.find("script", id="__NEXT_DATA__")
+        has_next_data = bool(script and script.string and len(script.string) > 50)
     except Exception:
-        return ""
+        has_next_data = False
 
-    # ---------- OpenAI Next.js /index/ 特殊处理：从 __NEXT_DATA__ 抽文本 ----------
-    if "openai.com/index/" in (r.url or url):
+    dbg_base = f"{dbg_base} next_data={has_next_data}"
+
+    # 1) OpenAI Next.js: 解析 __NEXT_DATA__
+    if "openai.com/index/" in (final_url or url) and has_next_data:
         try:
-            soup = BeautifulSoup(html, "lxml")
-            script = soup.find("script", id="__NEXT_DATA__")
-            if script and script.string:
-                import json
-                data = json.loads(script.string)
+            import json
+            data = json.loads(script.string)
 
-                # 递归收集字符串
-                texts = []
-                def walk(x):
-                    if x is None:
-                        return
-                    if isinstance(x, str):
-                        s = x.strip()
-                        if s:
-                            texts.append(s)
-                        return
-                    if isinstance(x, list):
-                        for i in x:
-                            walk(i)
-                        return
-                    if isinstance(x, dict):
-                        for v in x.values():
-                            walk(v)
+            texts = []
+            def walk(x):
+                if x is None:
+                    return
+                if isinstance(x, str):
+                    s = " ".join(x.split())
+                    if s:
+                        texts.append(s)
+                    return
+                if isinstance(x, list):
+                    for i in x:
+                        walk(i)
+                    return
+                if isinstance(x, dict):
+                    for v in x.values():
+                        walk(v)
 
-                # 通常正文在 props/pageProps 里，直接从根走也行
-                walk(data.get("props") or data)
+            # 从 props 优先递归
+            walk(data.get("props") or data)
 
-                # 过滤：去掉明显像键/短词的噪声，保留较长句子
-                cleaned = []
-                seen = set()
-                for t in texts:
-                    t2 = " ".join(t.split())
-                    if len(t2) < 30:
-                        continue
-                    if t2 in seen:
-                        continue
-                    seen.add(t2)
-                    cleaned.append(t2)
-                    if sum(len(x) for x in cleaned) > max_chars * 2:
-                        break
+            cleaned = []
+            seen = set()
+            for t in texts:
+                if len(t) < 40:
+                    continue
+                if t in seen:
+                    continue
+                seen.add(t)
+                cleaned.append(t)
+                if sum(len(x) for x in cleaned) > max_chars * 2:
+                    break
 
-                if cleaned:
-                    out = "\n\n".join(cleaned)
-                    if len(out) > max_chars:
-                        out = out[:max_chars].rstrip() + "…"
-                    return out
-        except Exception:
-            # 特殊处理失败则继续走通用路径
-            pass
+            if cleaned:
+                out = "\n\n".join(cleaned)
+                if len(out) > max_chars:
+                    out = out[:max_chars].rstrip() + "…"
+                return out, f"{dbg_base} method=next_data ok_len={len(out)}"
+            else:
+                return "", f"{dbg_base} method=next_data empty"
+        except Exception as e:
+            return "", f"{dbg_base} method=next_data err={type(e).__name__}"
 
-    # ---------- 通用路径：trafilatura ----------
+    # 2) trafilatura（需要依赖）
     try:
         import trafilatura
         text = trafilatura.extract(
@@ -289,17 +308,34 @@ def fetch_official_excerpt(url: str, max_chars: int = 1800) -> str:
             text = text.strip()
             if len(text) > max_chars:
                 text = text[:max_chars].rstrip() + "…"
-            return text
-    except Exception:
+            return text, f"{dbg_base} method=trafilatura ok_len={len(text)}"
+        else:
+            # 继续兜底
+            pass
+    except Exception as e:
+        # 继续兜底
         pass
 
-    # ---------- 通用兜底：BeautifulSoup ----------
-    soup = BeautifulSoup(html, "lxml")
-    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
-        tag.decompose()
+    # 3) BeautifulSoup 兜底
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
+            tag.decompose()
+        container = soup.find("article") or soup.find("main") or soup.body
+        if not container:
+            return "", f"{dbg_base} method=soup no_container"
 
-    container = soup.find("article") or soup
+        raw = container.get_text("\n", strip=True)
+        lines = [ln.strip() for ln in raw.split("\n") if len(ln.strip()) >= 15]
+        text = "\n".join(lines).strip()
+        if not text:
+            return "", f"{dbg_base} method=soup empty_text"
 
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + "…"
+        return text, f"{dbg_base} method=soup ok_len={len(text)}"
+    except Exception as e:
+        return "", f"{dbg_base} method=soup err={type(e).__name__}"
 
 
 # =========================
@@ -330,8 +366,8 @@ def main():
             if hit_keywords(title, summary):
                 model = guess_model(title)
                 change_type = classify_type(title, summary)
-                official_text = fetch_official_excerpt(link)
-                my_note = "" if official_text else f"official_text empty: {link}"
+                official_text, debug = fetch_official_excerpt(link)
+                my_note = "" if official_text else f"official_text empty | {debug}"
                 new_items.append((title, link, model, change_type, official_text, summary, my_note))
 
     # 有新内容才推送 & 写表
