@@ -2,6 +2,13 @@ import os, json, time, hmac, base64, hashlib
 import requests
 import feedparser
 
+FEISHU_APP_ID = os.environ["FEISHU_APP_ID"]
+FEISHU_APP_SECRET = os.environ["FEISHU_APP_SECRET"]
+
+BITABLE_BASE_ID = "EEHcbK8VYaYO2Vsja9eczYLBn5j"
+BITABLE_TABLE_ID = "tblblt8COU2FNveR"
+
+
 FEISHU_WEBHOOK = os.environ["FEISHU_WEBHOOK"]
 FEISHU_SECRET  = os.environ.get("FEISHU_SECRET")  # 若没启用签名校验可不填
 
@@ -61,7 +68,36 @@ def post_feishu(text: str):
         url = FEISHU_WEBHOOK
 
     r = requests.post(url, json=payload, timeout=20)
+    r.raise_for_status)
+
+def get_tenant_token():
+    url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    payload = {
+        "app_id": FEISHU_APP_ID,
+        "app_secret": FEISHU_APP_SECRET
+    }
+    r = requests.post(url, json=payload, timeout=20)
     r.raise_for_status()
+    return r.json()["tenant_access_token"]
+
+def write_bitable(token, model, change_type, summary):
+    url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{BITABLE_BASE_ID}/tables/{BITABLE_TABLE_ID}/records"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "fields": {
+            "时间": int(time.time() * 1000),
+            "模型": model,
+            "类型": change_type,
+            "官方一句话": summary,
+            "我的判断": ""
+        }
+    }
+    r = requests.post(url, headers=headers, json=data, timeout=20)
+    r.raise_for_status()
+
 
 def hit_keywords(title: str, summary: str) -> bool:
     t = (title or "").lower()
@@ -86,8 +122,16 @@ def main():
             seen.add(link)
 
     # 只推送命中的，避免噪声
-    for title, link in new_items[:10]:
-        post_feishu(f"【AI重大更新】{title}\n{link}")
+token = get_tenant_token()
+
+for title, link in new_items[:10]:
+    post_feishu(f"【AI重大更新】{title}\n{link}")
+    write_bitable(
+        token=token,
+        model="GPT",              # 先写死，后面可优化
+        change_type="大版本",     # 先写死
+        summary=title
+    )
 
     state["seen"] = list(seen)[-2000:]  # 保留最近2000条避免state过大
     save_state(state)
