@@ -68,7 +68,7 @@ def post_feishu(text: str):
         url = FEISHU_WEBHOOK
 
     r = requests.post(url, json=payload, timeout=20)
-    r.raise_for_status)
+    r.raise_for_status()
 
 def get_tenant_token():
     url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
