@@ -205,31 +205,77 @@ def _clean_text(s: str) -> str:
 def fetch_official_excerpt(url: str, max_chars: int = 1800) -> str:
     """
     稳定抓取文章正文原文
-    - 先请求 HTML，记录状态码/最终 URL（便于定位跳转/403）
-    - 首选 trafilatura 抽正文
-    - 失败再用 BeautifulSoup 兜底抽取
-    返回空字符串表示本次抓取失败
+    - OpenAI /index/ 类页面：优先解析 Next.js 的 __NEXT_DATA__ JSON 抽文本
+    - 其他页面：trafilatura 抽取，失败再 soup 兜底
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AIRSSBot/2.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
     }
 
     try:
         r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
-        status = r.status_code
-        final_url = r.url
-        if status >= 400:
-            # 直接返回空，外层会写“抓取失败信息”
+        if r.status_code >= 400:
             return ""
         html = r.text
     except Exception:
         return ""
 
-    # 1) 首选：trafilatura
+    # ---------- OpenAI Next.js /index/ 特殊处理：从 __NEXT_DATA__ 抽文本 ----------
+    if "openai.com/index/" in (r.url or url):
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            script = soup.find("script", id="__NEXT_DATA__")
+            if script and script.string:
+                import json
+                data = json.loads(script.string)
+
+                # 递归收集字符串
+                texts = []
+                def walk(x):
+                    if x is None:
+                        return
+                    if isinstance(x, str):
+                        s = x.strip()
+                        if s:
+                            texts.append(s)
+                        return
+                    if isinstance(x, list):
+                        for i in x:
+                            walk(i)
+                        return
+                    if isinstance(x, dict):
+                        for v in x.values():
+                            walk(v)
+
+                # 通常正文在 props/pageProps 里，直接从根走也行
+                walk(data.get("props") or data)
+
+                # 过滤：去掉明显像键/短词的噪声，保留较长句子
+                cleaned = []
+                seen = set()
+                for t in texts:
+                    t2 = " ".join(t.split())
+                    if len(t2) < 30:
+                        continue
+                    if t2 in seen:
+                        continue
+                    seen.add(t2)
+                    cleaned.append(t2)
+                    if sum(len(x) for x in cleaned) > max_chars * 2:
+                        break
+
+                if cleaned:
+                    out = "\n\n".join(cleaned)
+                    if len(out) > max_chars:
+                        out = out[:max_chars].rstrip() + "…"
+                    return out
+        except Exception:
+            # 特殊处理失败则继续走通用路径
+            pass
+
+    # ---------- 通用路径：trafilatura ----------
     try:
         import trafilatura
         text = trafilatura.extract(
@@ -247,24 +293,12 @@ def fetch_official_excerpt(url: str, max_chars: int = 1800) -> str:
     except Exception:
         pass
 
-    # 2) 兜底：BeautifulSoup
+    # ---------- 通用兜底：BeautifulSoup ----------
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
         tag.decompose()
 
-    container = soup.find("article") or soup.find("main") or soup.body
-    if not container:
-        return ""
-
-    raw = container.get_text("\n", strip=True)
-    lines = [ln.strip() for ln in raw.split("\n") if len(ln.strip()) >= 10]
-    text = "\n".join(lines).strip()
-    if not text:
-        return ""
-
-    if len(text) > max_chars:
-        text = text[:max_chars].rstrip() + "…"
-    return text
+    container = soup.find("article") or soup
 
 
 
