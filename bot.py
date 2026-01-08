@@ -104,11 +104,14 @@ def get_tenant_token() -> str:
 # 调试：列出你有权限的 Bitable apps 和 tables
 # =========================
 
-def debug_list_bitable_apps(token: str):
-    url = "https://open.feishu.cn/open-apis/bitable/v1/apps?page_size=50"
+
+def debug_get_bitable_app_meta(token: str, app_token_or_base: str):
+    # 尝试用你现在的 EEHcb... 去取元数据
+    url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token_or_base}"
     headers = {"Authorization": f"Bearer {token}"}
     r = requests.get(url, headers=headers, timeout=20)
-    print("=== DEBUG: LIST_APPS ===")
+    print("=== DEBUG: GET_APP_META ===")
+    print("url:", url)
     print("status:", r.status_code)
     print("resp:", r.text)
     r.raise_for_status()
@@ -167,7 +170,7 @@ def main():
 
     # 1) 先跑调试：把你有权限的 app_token 列出来（通常是 bascn...）
     if DEBUG_BITABLE:
-        debug_list_bitable_apps(token)
+        debug_get_bitable_app_meta(token, BITABLE_BASE_ID)
         # 如果你已经知道正确的 bascn...，也可以把它填在这里再跑一次列 tables：
         # debug_list_tables(token, "bascnxxxxxxxxxxxxxxxx")
 
