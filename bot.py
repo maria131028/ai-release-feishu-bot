@@ -2,6 +2,8 @@ import os, json, time, hmac, base64, hashlib
 import requests
 import feedparser
 
+DEBUG_HEARTBEAT = os.environ.get("DEBUG_HEARTBEAT") == "1"
+
 # ====== 飞书应用（用于写多维表格）======
 FEISHU_APP_ID = os.environ["FEISHU_APP_ID"]
 FEISHU_APP_SECRET = os.environ["FEISHU_APP_SECRET"]
@@ -122,6 +124,11 @@ def main():
                 new_items.append((title, link))
 
     # 只在确实有命中时才拿 token、写表、推送（减少无效请求）
+    if DEBUG_HEARTBEAT:
+        token = get_tenant_token()
+        post_feishu("✅心跳：Actions 已运行，推送&写表链路正常。")
+        write_bitable(token=token, model="SYSTEM", change_type="心跳", summary="Actions heartbeat OK")
+
     if new_items:
         token = get_tenant_token()
 
