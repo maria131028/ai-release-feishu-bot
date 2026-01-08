@@ -207,20 +207,23 @@ def _clean_text(s: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_official_excerpt(url: str, max_chars: int = 1200, max_paragraphs: int = 6) -> str:
+def fetch_official_excerpt(url: str, max_chars: int = 1800, max_paragraphs: int = 8) -> str:
     """
-    抓取文章正文的前若干段作为“官方原文”（不是摘要、不是改写）
-    - 优先取 <article>，其次 <main>，最后 body
-    - 只拼接 <p> 段落
+    抓取文章正文作为“官方原文”
+    - 优先抽取 <article> / <main>
+    - 优先拼接 <p> 段落；如果抓不到 <p>，则兜底用容器纯文本
     - 截断到 max_chars
     """
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AIRSSBot/2.0; +https://github.com/)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AIRSSBot/2.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
     try:
-        r = requests.get(url, headers=headers, timeout=25)
+        r = requests.get(url, headers=headers, timeout=30)
         r.raise_for_status()
     except Exception:
         return ""
@@ -228,26 +231,41 @@ def fetch_official_excerpt(url: str, max_chars: int = 1200, max_paragraphs: int 
     soup = BeautifulSoup(r.text, "lxml")
 
     # 去掉明显噪声
-    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
         tag.decompose()
 
     container = soup.find("article") or soup.find("main") or soup.body
     if not container:
         return ""
 
+    def clean_text(s: str) -> str:
+        s = (s or "").replace("\r", "\n")
+        lines = [ln.strip() for ln in s.split("\n")]
+        lines = [ln for ln in lines if ln]
+        return "\n".join(lines).strip()
+
+    # 1) 主路径：抽取段落 <p>
     paragraphs = []
     for p in container.find_all("p"):
-        txt = _clean_text(p.get_text(" ", strip=True))
+        txt = clean_text(p.get_text(" ", strip=True))
         if not txt:
             continue
-        # 过滤极短噪声段
-        if len(txt) < 20:
+        # 放宽过滤，避免“段落都被误杀”
+        if len(txt) < 10:
             continue
         paragraphs.append(txt)
         if len(paragraphs) >= max_paragraphs:
             break
 
     text = "\n\n".join(paragraphs).strip()
+
+    # 2) 兜底：如果没有 <p>，直接取容器纯文本（适配某些站点用 div/span 渲染正文）
+    if not text:
+        raw = clean_text(container.get_text("\n", strip=True))
+        # 再做一次“去噪”：剔除明显过短行
+        lines = [ln for ln in raw.split("\n") if len(ln.strip()) >= 10]
+        text = "\n".join(lines).strip()
+
     if not text:
         return ""
 
@@ -255,6 +273,7 @@ def fetch_official_excerpt(url: str, max_chars: int = 1200, max_paragraphs: int 
         text = text[:max_chars].rstrip() + "…"
 
     return text
+
 
 
 # =========================
