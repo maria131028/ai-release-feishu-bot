@@ -84,7 +84,12 @@ def post_feishu(text: str):
     else:
         url = FEISHU_WEBHOOK
 
-    r = requests.post(url, json=payload, timeout=20)
+    r = requests.post(url, headers=headers, json=data, timeout=20)
+    print("=== DEBUG: WRITE_RECORD ===")
+    print("url:", url)
+    print("payload:", json.dumps(data, ensure_ascii=False))
+    print("status:", r.status_code)
+    print("resp:", r.text)
     r.raise_for_status()
 
 
