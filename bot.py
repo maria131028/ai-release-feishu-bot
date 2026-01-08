@@ -77,6 +77,7 @@ def sign(timestamp: str, secret: str) -> str:
 def post_feishu(text: str):
     payload = {"msg_type": "text", "content": {"text": text}}
 
+    # 没开签名就直接发 webhook；开了就带 timestamp/sign
     if FEISHU_SECRET:
         ts = str(int(time.time()))
         s = sign(ts, FEISHU_SECRET)
@@ -84,13 +85,11 @@ def post_feishu(text: str):
     else:
         url = FEISHU_WEBHOOK
 
-    r = requests.post(url, headers=headers, json=data, timeout=20)
-    print("=== DEBUG: WRITE_RECORD ===")
-    print("url:", url)
-    print("payload:", json.dumps(data, ensure_ascii=False))
-    print("status:", r.status_code)
-    print("resp:", r.text)
+    r = requests.post(url, json=payload, timeout=20)
+    print("FEISHU_WEBHOOK status:", r.status_code)
+    print("FEISHU_WEBHOOK resp:", r.text)
     r.raise_for_status()
+
 
 
 # =========================
