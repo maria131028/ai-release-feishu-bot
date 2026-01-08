@@ -367,7 +367,26 @@ def main():
                 model = guess_model(title)
                 change_type = classify_type(title, summary)
                 official_text, debug = fetch_official_excerpt(link)
+
+                # 403/抓不到正文：用 RSS 的 summary/content 兜底（仍然属于官方源输出）
+                if not official_text:
+                    rss_fallback = ""
+                    # feedparser 常见字段：content 优先，其次 summary
+                    if hasattr(e, "content") and e.content:
+                        rss_fallback = getattr(e.content[0], "value", "") or ""
+                    if not rss_fallback:
+                        rss_fallback = getattr(e, "summary", "") or ""
+                
+                    # 简单去掉 HTML 标签（避免写入一堆 <p>）
+                    rss_fallback = BeautifulSoup(rss_fallback, "lxml").get_text("\n", strip=True)
+                
+                    # 截断，避免单元格过长
+                    rss_fallback = rss_fallback[:1800].rstrip() + ("…" if len(rss_fallback) > 1800 else "")
+                
+                    official_text = rss_fallback
+                
                 my_note = "" if official_text else f"official_text empty | {debug}"
+
                 new_items.append((title, link, model, change_type, official_text, summary, my_note))
 
     # 有新内容才推送 & 写表
