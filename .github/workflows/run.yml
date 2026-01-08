@@ -18,7 +18,7 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install requests feedparser beautifulsoup4 lxml
+          pip install requests feedparser beautifulsoup4 lxml trafilatura
 
       - name: Run bot
         env:
