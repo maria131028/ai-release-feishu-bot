@@ -84,7 +84,6 @@ def write_bitable(token: str, model: str, change_type: str, summary: str):
 
     data = {
         "fields": {
-            "时间": int(time.time() * 1000),
             "模型": model,
             "类型": change_type,
             "官方一句话": summary,
