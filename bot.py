@@ -316,7 +316,7 @@ def main():
             model=model,
             change_type=change_type,
             summary=title,              # 你表里的“官方一句话”目前就放标题（稳定、可靠）
-            official_text=official_text # 正文摘录写入“官方原文”
+            official_text="TEST_OFFICIAL_TEXT" # 正文摘录写入“官方原文”
         )
 
     state["seen"] = list(seen)[-3000:]
