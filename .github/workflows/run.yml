@@ -44,5 +44,5 @@ jobs:
           git status
 
           git commit -m "update state" || echo "No changes to commit"
-          git push
+          
 
