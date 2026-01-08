@@ -105,13 +105,8 @@ def feishu_headers(token: str) -> Dict[str, str]:
 # 写入 Bitable（新增记录）
 # =========================
 
-def write_bitable(
-    token: str,
-    model: str,
-    change_type: str,
-    summary: str,
-    official_text: str,
-):
+
+def write_bitable(token: str, model: str, change_type: str, summary: str, official_text: str, my_note: str):
     url = (
         f"https://open.feishu.cn/open-apis/bitable/v1/apps/"
         f"{BITABLE_BASE_ID}/tables/{BITABLE_TABLE_ID}/records"
@@ -123,7 +118,7 @@ def write_bitable(
             "类型": change_type,
             "官方一句话": summary,
             "官方原文": official_text,
-            "我的判断": ""
+            "我的判断": my_note
         }
     }
 
@@ -207,12 +202,13 @@ def _clean_text(s: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_official_excerpt(url: str, max_chars: int = 1800, max_paragraphs: int = 8) -> str:
+def fetch_official_excerpt(url: str, max_chars: int = 1800) -> str:
     """
-    抓取文章正文作为“官方原文”
-    - 优先抽取 <article> / <main>
-    - 优先拼接 <p> 段落；如果抓不到 <p>，则兜底用容器纯文本
-    - 截断到 max_chars
+    稳定抓取文章正文原文
+    - 先请求 HTML，记录状态码/最终 URL（便于定位跳转/403）
+    - 首选 trafilatura 抽正文
+    - 失败再用 BeautifulSoup 兜底抽取
+    返回空字符串表示本次抓取失败
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AIRSSBot/2.0",
@@ -223,14 +219,36 @@ def fetch_official_excerpt(url: str, max_chars: int = 1800, max_paragraphs: int 
     }
 
     try:
-        r = requests.get(url, headers=headers, timeout=30)
-        r.raise_for_status()
+        r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+        status = r.status_code
+        final_url = r.url
+        if status >= 400:
+            # 直接返回空，外层会写“抓取失败信息”
+            return ""
+        html = r.text
     except Exception:
         return ""
 
-    soup = BeautifulSoup(r.text, "lxml")
+    # 1) 首选：trafilatura
+    try:
+        import trafilatura
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=False,
+            include_links=False,
+            favor_precision=True
+        )
+        if text:
+            text = text.strip()
+            if len(text) > max_chars:
+                text = text[:max_chars].rstrip() + "…"
+            return text
+    except Exception:
+        pass
 
-    # 去掉明显噪声
+    # 2) 兜底：BeautifulSoup
+    soup = BeautifulSoup(html, "lxml")
     for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
         tag.decompose()
 
@@ -238,40 +256,14 @@ def fetch_official_excerpt(url: str, max_chars: int = 1800, max_paragraphs: int 
     if not container:
         return ""
 
-    def clean_text(s: str) -> str:
-        s = (s or "").replace("\r", "\n")
-        lines = [ln.strip() for ln in s.split("\n")]
-        lines = [ln for ln in lines if ln]
-        return "\n".join(lines).strip()
-
-    # 1) 主路径：抽取段落 <p>
-    paragraphs = []
-    for p in container.find_all("p"):
-        txt = clean_text(p.get_text(" ", strip=True))
-        if not txt:
-            continue
-        # 放宽过滤，避免“段落都被误杀”
-        if len(txt) < 10:
-            continue
-        paragraphs.append(txt)
-        if len(paragraphs) >= max_paragraphs:
-            break
-
-    text = "\n\n".join(paragraphs).strip()
-
-    # 2) 兜底：如果没有 <p>，直接取容器纯文本（适配某些站点用 div/span 渲染正文）
-    if not text:
-        raw = clean_text(container.get_text("\n", strip=True))
-        # 再做一次“去噪”：剔除明显过短行
-        lines = [ln for ln in raw.split("\n") if len(ln.strip()) >= 10]
-        text = "\n".join(lines).strip()
-
+    raw = container.get_text("\n", strip=True)
+    lines = [ln.strip() for ln in raw.split("\n") if len(ln.strip()) >= 10]
+    text = "\n".join(lines).strip()
     if not text:
         return ""
 
     if len(text) > max_chars:
         text = text[:max_chars].rstrip() + "…"
-
     return text
 
 
@@ -305,18 +297,19 @@ def main():
                 model = guess_model(title)
                 change_type = classify_type(title, summary)
                 official_text = fetch_official_excerpt(link)
-
-                new_items.append((title, link, model, change_type, official_text, summary))
+                my_note = "" if official_text else f"official_text empty: {link}"
+                new_items.append((title, link, model, change_type, official_text, summary, my_note))
 
     # 有新内容才推送 & 写表
-    for title, link, model, change_type, official_text, summary in new_items:
-        post_feishu(f"【AI 更新】{title}\n类型：{change_type}\n{link}")
+    for title, link, model, change_type, official_text, summary, my_note in new_items:
+        ...
         write_bitable(
             token=token,
             model=model,
             change_type=change_type,
-            summary=title,              # 你表里的“官方一句话”目前就放标题（稳定、可靠）
-            official_text="TEST_OFFICIAL_TEXT" # 正文摘录写入“官方原文”
+            summary=title,
+            official_text=official_text,
+            my_note=my_note
         )
 
     state["seen"] = list(seen)[-3000:]
