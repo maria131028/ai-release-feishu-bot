@@ -26,7 +26,6 @@ jobs:
           FEISHU_SECRET:  ${{ secrets.FEISHU_SECRET }}
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          DEBUG_HEARTBEAT: "1"
         run: |
           python bot.py
 
