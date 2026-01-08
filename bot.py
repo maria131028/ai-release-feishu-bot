@@ -124,14 +124,14 @@ def main():
     # 只推送命中的，避免噪声
 token = get_tenant_token()
 
-for title, link in new_items[:10]:
-    post_feishu(f"【AI重大更新】{title}\n{link}")
-    write_bitable(
-        token=token,
-        model="GPT",              # 先写死，后面可优化
-        change_type="大版本",     # 先写死
-        summary=title
-    )
+    for title, link in new_items[:10]:
+        post_feishu(f"【AI重大更新】{title}\n{link}")
+        write_bitable(
+            token=token,
+            model="GPT",              # 先写死，后面可优化
+            change_type="大版本",     # 先写死
+            summary=title
+        )
 
     state["seen"] = list(seen)[-2000:]  # 保留最近2000条避免state过大
     save_state(state)
